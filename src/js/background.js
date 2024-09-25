@@ -1,5 +1,8 @@
 "use strict";
 
+importScripts('pako_deflate.js', 'settings.js');
+
+
 // States of all tabs (default = true).
 var tabEnabled = {};
 
@@ -16,12 +19,12 @@ function setTabEnabled(tabID, enabled) {
 }
 
 // Background messages listener.
-webExtension.runtime.onMessage.addListener(onMessage);
+chrome.runtime.onMessage.addListener(onMessage);
 function onMessage(message, sender, callback) {
 	var tabID;
 	if (sender.tab)
 		tabID = sender.tab.id;
-	
+
 	switch (message.action) {
 		case "fetchImageData":
 			log("tab " + tabID + " need indirect img fetch: " + message.url);
@@ -47,8 +50,8 @@ function onMessage(message, sender, callback) {
 				s += "(" + reason + ")";
 			log(s);
 
-			callback({ 
-				"enabled": state, 
+			callback({
+				"enabled": state,
 				"reason": reason,
 				"settings": globalSettings
 			});
@@ -56,7 +59,7 @@ function onMessage(message, sender, callback) {
 
 		case "compressCode":
 			log("tab " + tabID + " require compression of " + message.code.length + " bytes");
-	
+
 			compressCode(message.code, callback);
 			break;
 
@@ -70,7 +73,7 @@ function onMessage(message, sender, callback) {
 	return true;
 }
 
-webExtension.browserAction.onClicked.addListener(function(tab) {
+chrome.action.onClicked.addListener(function (tab) {
 	var tabID = tab.id;
 
 	var enabled = !getTabEnabled(tabID);
@@ -82,40 +85,40 @@ webExtension.browserAction.onClicked.addListener(function(tab) {
 
 	if (enabled) {
 		log("send enable command to tab " + tabID);
-		message = { 
-			"action": "enable", 
-			"settings": globalSettings 
+		message = {
+			"action": "enable",
+			"settings": globalSettings
 		};
 	} else {
 		log("send disable command to tab " + tabID);
-		message = { 
+		message = {
 			"action": "disable"
 		};
 	}
 
-	webExtension.tabs.sendMessage(tabID, message);
+	chrome.tabs.sendMessage(tabID, message);
 
 	updateIconState(enabled);
 });
 
-webExtension.tabs.onActivated.addListener(function(activeInfo) {
+chrome.tabs.onActivated.addListener(function (activeInfo) {
 	onTabActivated(activeInfo.tabId);
 });
-/*webExtension.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
+/*chrome.tabs.onUpdated.addListener(function (tabId, changeInfo, tab) {
 	onTabActivated(tabId);
 });*/
 
 // Options page notify changed settings, so notify all enabled tabs.
 function onSettingsChanged() {
-	loadSettings(function() {
-		var message = { 
+	loadSettings(function () {
+		var message = {
 			"action": "settingsChanged",
 			"settings": globalSettings
 		};
-	
+
 		for (const prop in tabEnabled) {
 			if (tabEnabled[prop])
-				webExtension.tabs.sendMessage(parseInt(prop, 10), message);
+				chrome.tabs.sendMessage(parseInt(prop, 10), message);
 		}
 	});
 }
@@ -132,8 +135,11 @@ function onTabActivated(tabID) {
 // Change extension icon according to state.
 var currentIconState;
 function updateIconState(enabled) {
+
 	var title;
 	var iconFilename;
+
+
 
 	if (currentIconState === enabled)
 		return;
@@ -148,8 +154,11 @@ function updateIconState(enabled) {
 		iconFilename = "icon-disabled128.png";
 	}
 
-	webExtension.browserAction.setIcon({ path: "images/" + iconFilename });
-	webExtension.browserAction.setTitle({ "title": title });
+	chrome.action.setIcon({
+		path: chrome.runtime.getURL("images/" + iconFilename)
+	});
+
+	chrome.action.setTitle({ "title": title });
 }
 
 // Check if site is not listed in disallowSites.
@@ -162,14 +171,14 @@ function isSiteAllowed(hostname, href) {
 	href = href.replace(/(^\w+:|^)\/\//, "").replace(/^www./, "").replace(/\/$/, "");
 
 	var items = defaultDisallowSites.concat(globalSettings.disallowSites);
-	for (var i=0, len=items.length; i < len; i++) { 
+	for (var i = 0, len = items.length; i < len; i++) {
 		var item = items[i];
 
 		if (item.indexOf("/") >= 0) {
-			if ((href === item) || href.startsWith(item+"/"))
+			if ((href === item) || href.startsWith(item + "/"))
 				return false;
 		} else {
-			if ((hostname === item) || hostname.endsWith("."+item))
+			if ((hostname === item) || hostname.endsWith("." + item))
 				return false;
 		}
 	}
@@ -183,10 +192,10 @@ function fechImageDataUri(uri, callback) {
 	xhr.open("GET", uri, true);
 	xhr.responseType = "arraybuffer";
 
-	xhr.onload = function() {
+	xhr.onload = function () {
 		var contentType = this.getResponseHeader("Content-Type");
 		var unicode = toUnicodeString(this.response);
-		var base64 = window.btoa(unicode);  // encode in base64
+		var base64 = self.btoa(unicode);  // encode in base64
 		var dataUri = "data:" + contentType + ";base64," + base64;
 		callback(dataUri);
 	};
@@ -197,7 +206,7 @@ function fechImageDataUri(uri, callback) {
 function toUnicodeString(arrayBuffer) {
 	var bytes = new Uint8Array(arrayBuffer);
 	var binaryString = "";
-	for(var i = 0; i < bytes.byteLength; i++) {
+	for (var i = 0; i < bytes.byteLength; i++) {
 		binaryString += String.fromCharCode(bytes[i]);
 	}
 	return binaryString;
@@ -208,7 +217,7 @@ function compressCode(code, callback) {
 	//var utf8Data = unescape(encodeURIComponent(code));
 	var utf8Data = new TextEncoder('utf-8').encode(code);  // https://docs.kroki.io/kroki/setup/encode-diagram/#javascript
 
-	if (!window.CompressionStream) {
+	if (!self.CompressionStream) {
 		// No native deflate, fallback to external lib.
 
 		log("Deflate using external lib");
@@ -217,16 +226,16 @@ function compressCode(code, callback) {
 		//var base64 = btoa(compressed) 
 		//  .replace(/\+/g, '-').replace(/\//g, '_') 
 		//callback(base64);
-		
+
 		var compressed = pako.deflate(utf8Data, { level: 9 });
 		encode64(compressed, callback);
 		return;
 	}
-	
+
 	// Native CompressionStream: https://docs.google.com/document/d/1TovyqqeC3HoO0A4UUBKiCyhZlQSl7jM_F7KbWjK2Gcs
 	const stream = new Response(utf8Data).body.pipeThrough(new CompressionStream('deflate'));
 	var compressor = new Response(stream).arrayBuffer();
-	compressor.then(function(compressed) {  // compressed is ByteArray
+	compressor.then(function (compressed) {  // compressed is ByteArray
 		//log("deflate", utf8Data, compressed);
 		encode64(compressed, callback);
 	});
@@ -239,11 +248,11 @@ function encode64(buffer, callback) {
 	var blob = new Blob([buffer]);
 
 	var reader = new FileReader();
-	reader.onload = function(event) {
+	reader.onload = function (event) {
 		var dataurl = event.target.result;
 
 		var base64 = dataurl.substr(dataurl.indexOf(',') + 1);
-			   
+
 		//log("base64", base64);
 		callback(base64);
 	};
